@@ -5,7 +5,7 @@ Usage personnel. Visuel « Wack'd flangerus » (Studio Wiga).
 
 ## Installation via GitHub
 
-1. Déposer à la racine du dépôt : `background.jpg`, `bars_lit.png`, `mode_sw.png`, `krazy_sw.png`, `knob_strip.png`, `Montserrat-Bold.ttf`, `CMakeLists.txt`, `PluginProcessor.h/.cpp`, `PluginEditor.h/.cpp`, `README.md` et le dossier `.github/workflows/build.yml`.
+1. Déposer à la racine du dépôt : `background.jpg`, `bars_lit.png`, `bars_lit_amber.png`, `mode_sw.png`, `mode_sw_r.png`, `krazy_sw.png`, `krazy_sw_r.png`, `knob_strip.png`, `Montserrat-Bold.ttf`, `CMakeLists.txt`, `PluginProcessor.h/.cpp`, `PluginEditor.h/.cpp`, `README.md` et le dossier `.github/workflows/build.yml`.
 2. Le push lance la compilation (onglet **Actions**) : Windows (`windows-2022`) et macOS (binaire universel).
 3. Télécharger l'artefact :
    - **Windows** : copier `Wackd.vst3` dans `C:\Program Files\Common Files\VST3\`
@@ -27,7 +27,7 @@ Usage personnel. Visuel « Wack'd flangerus » (Studio Wiga).
 | Sorties | OUT1 = direct + effet ; **INV OUT2** = direct − effet (effet en opposition de phase → stéréo large) | Canal gauche = OUT1, canal droit = INV OUT2 |
 | Footswitch / LED | Commutation électronique, LED rouge | Clic sur la plaque inférieure, LED rouge animée |
 
-> En Wack'd, OUT2 est l'inverse exact de OUT1 (comme sur la pédale) : si la piste est repliée en mono, le signal s'annule. Rester en stéréo.
+> Sortie réglable (clic droit > Output) : **Mono compatible** par défaut, ou **CF7 stereo** d'origine (OUT2 = direct − effet). Voir « Placement dans Reaper » plus bas.
 
 Sources : effectsdatabase.com (fiche et manuel CF7), mirosol.kapsi.fi (puce M50198, démontage), freestompboxes.org (analyse du mixage direct/effet), avis utilisateurs (gearbug, equipboard, lonephantom).
 
@@ -36,8 +36,10 @@ Sources : effectsdatabase.com (fiche et manuel CF7), mirosol.kapsi.fi (puce M501
 - Fenêtre ouverte par défaut à **493 px de haut** ; impossible de la réduire en dessous. La pédale occupe presque toute la hauteur, comme Textural et Freeze Shimmer.
 - **Clic droit** : taille (Default / 75 % / 100 %), presets d'usine, presets utilisateur 1 à 9 (charger / sauvegarder), table MIDI.
 - **Potards** : noirs sobres, rendu haute définition pré-calculé (128 positions) : calotte noire usinée, jupe moletée noire, repère blanc ; la lumière reste fixe en haut à gauche, seuls le repère et le moletage tournent.
-- **LED et barres** du visuel : LED bleu glace qui scintille légèrement, barres qui s'allument selon les potards (Speed = vitesse de la vague, Depth = amplitude, Delay Time = niveau de base, Regen = scintillement).
-- **Ligne d'état** sous la LED : elle n'apparaît que lorsqu'un potard bouge (souris, automation ou MIDI), reste 2,5 s puis s'efface en fondu.
+- **LED et jauge** : bleu glace en Chorus, jaune-orangé (même intensité) en Flanger ; la jauge sous la LED s'allume de gauche (0 %) à droite (100 %) selon le dernier potard tourné.
+- **Switchs MODE / KRAZY** : le levier se déplace réellement (gauche = Chorus / Normal, droite = Flanger / Wack'd).
+- **Indication d'alimentation** centrée en haut de la pédale.
+- **Ligne d'état** agrandie sous la LED (texte 20 px / 15,5 px à 100 %) : elle n'apparaît que lorsqu'un potard bouge, reste 2,5 s puis s'efface en fondu.
 - **STUDIO WIGA** sous le footswitch, dans la police du logo Studio Wiga (Montserrat Bold, licence libre OFL), imprimé dans la même encre que « Wack'd » et « flangerus », avec un léger voile couleur papier dessous pour rester lisible sur le dessin.
 - **Prises jack** : mêmes écrous chromés que la pédale Textural (OUT1 et INV. OUT2 à gauche, IN à droite).
 - Fond noir avec les motifs de la pédale en transparence autour.
@@ -59,15 +61,20 @@ Tous les paramètres sont aussi automatisables et assignables en MIDI-learn dans
 
 1. Classic Chorus · 2. Lush Stereo Chorus · 3. Jet Flanger · 4. Metallic Flange · 5. Slow Deep Sweep · 6. Wack'd Vibrato · 7. Korny Chirps · 8. Ring Mod Madness · **9. My Road**
 
-**My Road** recrée l'intro de « My Way » (Limp Bizkit, 2000). Wes Borland y utilisait un flanger Ibanez réglé sur « whacked » (interview MusicRadar, citée par Equipboard) : MODE Flanger, KRAZY Wack'd, Speed 3,2 · Depth 5,5 · Delay Time 3 · Regen 4,5. Sur le disque, le son passe ensuite dans un Echoplex (écho à bande) et un ampli clair : ajoute un écho ~350 ms avec quelques répétitions après le plugin pour s'en approcher.
+**My Road** recrée l'intro de « My Way » (Limp Bizkit, 2000), jouée sur cette pédale : MODE Chorus, KRAZY Wack'd, Speed 95,6 % · Depth 1,6 % · Delay Time 73,5 % · Regen 12,3 %. Sur le disque, le son passe ensuite dans un Echoplex (écho à bande) et un ampli clair.
 
-## Moteur audio (v1.4)
+## Placement dans Reaper (avant / après un simulateur d'ampli)
 
-- **Speed** : 0,08 → 8 Hz en Normal ; 0,5 → 120 Hz en Wack'd (au-delà de ~25 Hz, la modulation devient audible comme des bandes latérales type ring-mod).
-- **Chorus** : retard 4 → 22 ms (Delay Time), LFO triangle aux sommets arrondis, excursion limitée selon la vitesse pour garder un désaccord musical.
-- **Flanger** : balayage exponentiel du retard (0,25 ms → 14 ms selon Delay Time et Depth), le peigne monte et descend régulièrement ; Regen jusqu'à 92 % avec saturation douce et amortissement des aigus dans la boucle.
-- **Wack'd** : signal direct coupé (vibrato), aigus plus filtrés, niveau égal au bypass, deux sorties de même polarité (compatible mono).
-- **Normal** : OUT1 = direct + effet, OUT2 = direct − effet, comme la pédale (stéréo large).
-- Gain contrôlé (sortie ≈ niveau d'entrée), plus de grain numérique ni d'écrêtage.
+La vraie CF7 sort sur deux jacks : OUT1 = direct + effet, OUT2 = direct − effet (effet inversé). Les versions ≤ 1.4 reproduisaient ça tel quel. Or un simulateur d'ampli comme Genome (Two Notes) traite la guitare en **mono** : il additionne gauche + droite, l'effet inversé s'annule et il ne reste que le son direct (en Wack'd, où il n'y a pas de son direct, le son disparaît complètement). Placé **après** Genome, le plugin recevait déjà le son d'ampli et sortait en stéréo, donc ça marchait. Arc, Freeze Shimmer, Textural et Ring Think n'ont pas de sortie inversée, d'où la différence.
+
+Depuis la v1.5, la sortie par défaut est **Mono compatible** : la droite utilise une seconde lecture du retard décalée de 90° au lieu de l'inversion, ce qui garde la largeur stéréo sans annulation. Le plugin se place donc **avant** Genome comme les autres. L'option **CF7 stereo** reste disponible (clic droit > Output) pour un usage après l'ampli.
+
+## Moteur audio (v1.5, modélisé d'après le schéma)
+
+- **LFO** (IC5 : intégrateur + trigger de Schmitt) = triangle. SPEED = potard log 500 kΩ + 5 kΩ → plage 1:100 : Chorus 0,1 → 10 Hz, Flanger 0,05 → 5 Hz (le switch MODE commute les condensateurs de temporisation) ; Wack'd : Chorus 0,6 → 40 Hz, Flanger 0,3 → 20 Hz.
+- **KRAZY Wack'd** : modulation fixe ajoutée par R44 (47 kΩ), indépendante de DEPTH (d'où un effet marqué même DEPTH au minimum), signal direct coupé, aigus filtrés (~6 kHz), niveau égal au bypass.
+- **Chorus** : retard 5 → 25 ms, LFO triangle arrondi, excursion jusqu'à 60 % du retard (désaccord nettement plus marqué que la v1.4), effet un peu plus fort que le direct.
+- **Flanger** : balayage exponentiel 0,2 → 16 ms, Regen jusqu'à 95 % (saturation douce, anti-DC, amortissement des aigus dans la boucle).
+- Gain contrôlé, aucun écrêtage en usage normal.
 
 Référence DSP : J. O. Smith, *Physical Audio Signal Processing* (CCRMA), chapitre Flanger.

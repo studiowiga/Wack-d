@@ -21,13 +21,13 @@ public:
 class SlideSwitch : public juce::Component
 {
 public:
-    SlideSwitch (juce::RangedAudioParameter& p, juce::Image sprite);
+    SlideSwitch (juce::RangedAudioParameter& p, juce::Image left, juce::Image right);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
 
 private:
     bool value = false;
-    juce::Image sprite;   // interrupteur d'origine (levier a gauche)
+    juce::Image spriteLeft, spriteRight;   // levier a gauche / a droite
     juce::ParameterAttachment attachment;
 };
 
@@ -96,7 +96,8 @@ private:
     WackdAudioProcessor& proc;
     NickelKnobLookAndFeel lnf;
     RightClickForwarder rightClickFwd;
-    juce::Image background, barsLit;
+    juce::Image background, barsLit, barsLitAmber;
+    float modeBlend = 0.0f;      // 0 = chorus (bleu), 1 = flanger (jaune-orange)
 
     // « STUDIO WIGA » (police du logo)
     juce::Typeface::Ptr brandFace;

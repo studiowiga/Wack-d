@@ -138,6 +138,7 @@ private:
     std::atomic<float>* pMode   = nullptr;
     std::atomic<float>* pKrazy  = nullptr;
     std::atomic<float>* pActive = nullptr;
+    std::atomic<float>* pStereo = nullptr;
 
     // Moteur de retard
     std::vector<float> delayLine;
@@ -153,6 +154,7 @@ private:
     float  smDry      = 0.72f;
     float  smWet      = 0.72f;
     float  fbLP       = 0.0f;
+    float  smStereo   = 0.0f;
     float  smActive   = 1.0f;
     float  smCutoff   = 8000.0f;
     float  feedback   = 0.0f;
@@ -160,7 +162,7 @@ private:
     float  smoothCoef = 0.001f;
     float  activeCoef = 0.001f;
 
-    wiga::Biquad preFilterA, preFilterB, postFilterA, postFilterB;
+    wiga::Biquad preFilterA, preFilterB, postFilterA, postFilterB, postFilterC, postFilterD;
 
     int prevToggleValue = 0;
 

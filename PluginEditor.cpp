@@ -36,7 +36,7 @@ namespace
         { 363.5f, 394.0f, 371.5f, 415.5f }, { 375.5f, 395.0f, 383.5f, 415.5f }, { 387.5f, 394.0f, 395.5f, 415.5f },
         { 399.5f, 390.5f, 407.0f, 415.0f }, { 412.0f, 384.0f, 419.5f, 415.5f }, { 424.0f, 376.0f, 431.5f, 415.5f }
     };
-    const Rectangle<float> statusRect{ 218.5f, 423.0f, 322.0f, 34.0f };
+    const Rectangle<float> statusRect{ 149.5f, 430.0f, 460.0f, 58.0f };
     const Point<float>     footPos   { 379.0f, 818.0f };
     const float            footR     = 50.0f;
     const Rectangle<float> brandRect { 259.0f, 871.0f, 240.0f, 34.0f };
@@ -44,6 +44,10 @@ namespace
     const Colour iceCore  (0xffeafaff);
     const Colour iceMid   (0xffa9e9ff);
     const Colour iceDeep  (0xff4bb8e8);
+    // flanger : jaune-orange, meme intensite que le bleu glace
+    const Colour ambCore  (0xfffff6e2);
+    const Colour ambMid   (0xffffc25c);
+    const Colour ambDeep  (0xffec8a16);
 }
 
 //==============================================================================
@@ -67,8 +71,8 @@ void NickelKnobLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, 
 //==============================================================================
 // INTERRUPTEUR A GLISSIERE
 //==============================================================================
-SlideSwitch::SlideSwitch (RangedAudioParameter& p, Image img)
-    : sprite (img),
+SlideSwitch::SlideSwitch (RangedAudioParameter& p, Image left, Image right)
+    : spriteLeft (left), spriteRight (right),
       attachment (p, [this] (float v) { value = v > 0.5f; repaint(); })
 {
     attachment.sendInitialUpdate();
@@ -77,14 +81,12 @@ SlideSwitch::SlideSwitch (RangedAudioParameter& p, Image img)
 
 void SlideSwitch::paint (Graphics& g)
 {
-    // Le visuel montre le levier a gauche. Position droite : meme interrupteur en miroir.
-    if (! value || ! sprite.isValid())
+    // levier a gauche = CHORUS / NORMAL, levier a droite = FLANGER / WACK'D
+    const auto& img = value ? spriteRight : spriteLeft;
+    if (! img.isValid())
         return;
-
     g.setImageResamplingQuality (Graphics::highResamplingQuality);
-    const float w = (float) getWidth(), h = (float) getHeight();
-    g.drawImageTransformed (sprite, AffineTransform::scale (-w / (float) sprite.getWidth(), h / (float) sprite.getHeight())
-                                        .translated (w, 0.0f));
+    g.drawImage (img, getLocalBounds().toFloat(), RectanglePlacement::stretchToFit);
 }
 
 void SlideSwitch::mouseDown (const MouseEvent& e)
@@ -140,13 +142,17 @@ void FootSwitchArea::mouseUp (const MouseEvent&)
 WackdAudioProcessorEditor::WackdAudioProcessorEditor (WackdAudioProcessor& p)
     : AudioProcessorEditor (&p), proc (p),
       modeSwitch  (*p.apvts.getParameter ("mode"),
-                   ImageCache::getFromMemory (BinaryData::mode_sw_png, BinaryData::mode_sw_pngSize)),
+                   ImageCache::getFromMemory (BinaryData::mode_sw_png,    BinaryData::mode_sw_pngSize),
+                   ImageCache::getFromMemory (BinaryData::mode_sw_r_png,  BinaryData::mode_sw_r_pngSize)),
       krazySwitch (*p.apvts.getParameter ("krazy"),
-                   ImageCache::getFromMemory (BinaryData::krazy_sw_png, BinaryData::krazy_sw_pngSize)),
+                   ImageCache::getFromMemory (BinaryData::krazy_sw_png,   BinaryData::krazy_sw_pngSize),
+                   ImageCache::getFromMemory (BinaryData::krazy_sw_r_png, BinaryData::krazy_sw_r_pngSize)),
       footswitch  (*p.apvts.getParameter ("active"))
 {
     background = ImageCache::getFromMemory (BinaryData::background_jpg, BinaryData::background_jpgSize);
-    barsLit    = ImageCache::getFromMemory (BinaryData::bars_lit_png,   BinaryData::bars_lit_pngSize);
+    barsLit    = ImageCache::getFromMemory (BinaryData::bars_lit_png,       BinaryData::bars_lit_pngSize);
+    barsLitAmber = ImageCache::getFromMemory (BinaryData::bars_lit_amber_png, BinaryData::bars_lit_amber_pngSize);
+    modeBlend  = proc.apvts.getRawParameterValue ("mode")->load() > 0.5f ? 1.0f : 0.0f;
     lnf.strip  = ImageCache::getFromMemory (BinaryData::knob_strip_png, BinaryData::knob_strip_pngSize);
     brandFace  = Typeface::createSystemTypefaceFor (BinaryData::MontserratBold_ttf, (size_t) BinaryData::MontserratBold_ttfSize);
 
@@ -235,8 +241,8 @@ void WackdAudioProcessorEditor::resized()
 String WackdAudioProcessorEditor::buildStatusLine() const
 {
     auto v = [this] (const char* id) { return String (proc.apvts.getRawParameterValue (id)->load(), 1); };
-    return "SPEED " + v ("speed") + "   DEPTH " + v ("depth")
-         + "   DELAY " + v ("delay") + "   REGEN " + v ("regen");
+    return "SPEED " + v ("speed") + "  DEPTH " + v ("depth")
+         + "  DELAY " + v ("delay") + "  REGEN " + v ("regen");
 }
 
 String WackdAudioProcessorEditor::buildPresetLine() const
@@ -338,6 +344,12 @@ void WackdAudioProcessorEditor::timerCallback()
 
     updateBars (dt);
 
+    {
+        const float target = proc.apvts.getRawParameterValue ("mode")->load() > 0.5f ? 1.0f : 0.0f;
+        modeBlend += (target - modeBlend) * 0.25f;
+        if (std::abs (target - modeBlend) < 0.002f) modeBlend = target;
+    }
+
     // On ne redessine que la LED, les barres et la ligne d'etat
     repaint (scaled ({ ledPos.x - 60.0f, ledPos.y - 60.0f, 120.0f, 100.0f }).getUnion (scaled (barsArea.expanded (8.0f)))
                  .getUnion (scaled (statusRect.expanded (4.0f))));
@@ -347,66 +359,67 @@ void WackdAudioProcessorEditor::timerCallback()
 void WackdAudioProcessorEditor::drawLedAndBars (Graphics& g)
 {
     const bool on = footswitch.isOn();
+    const float mb = modeBlend;
+    const Colour core = iceCore.interpolatedWith (ambCore, mb);
+    const Colour mid  = iceMid .interpolatedWith (ambMid,  mb);
+    const Colour deep = iceDeep.interpolatedWith (ambDeep, mb);
 
-    // --- barres : le visuel montre les fentes eteintes ; elles s'allument
-    //     une a une de gauche a droite (la barre en cours s'allume progressivement)
-    if (barsLit.isValid())
+    // --- jauge : barres allumees de gauche a droite, bleu (chorus) / jaune-orange (flanger)
+    for (int i = 0; i < numBars; ++i)
     {
-        for (int i = 0; i < numBars; ++i)
+        const float f = barFill[i];
+        if (f <= 0.01f)
+            continue;
+
+        const auto* s = slots[i];
+        Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (Rectangle<float> (s[0] - 4.0f, s[1] - 4.0f, (s[2] - s[0]) + 8.0f, (s[3] - s[1]) + 8.0f)
+                                .getSmallestIntegerContainer());
+        const float op = jlimit (0.0f, 1.0f, f * barSpark[i]);
+        if (mb < 0.999f && barsLit.isValid())
         {
-            const float f = barFill[i];
-            if (f <= 0.01f)
-                continue;
-
-            const auto* s = slots[i];
-
-            Graphics::ScopedSaveState state (g);
-            Path clip;
-            clip.addRectangle (s[0] - 3.0f, s[1] - 3.0f, (s[2] - s[0]) + 6.0f, (s[3] - s[1]) + 6.0f);
-            g.reduceClipRegion (clip);
-            g.setOpacity (jlimit (0.0f, 1.0f, f * barSpark[i]));
+            g.setOpacity (op * (1.0f - mb));
             g.drawImage (barsLit, barsArea, RectanglePlacement::stretchToFit);
+        }
+        if (mb > 0.001f && barsLitAmber.isValid())
+        {
+            g.setOpacity (op * mb);
+            g.drawImage (barsLitAmber, barsArea, RectanglePlacement::stretchToFit);
         }
     }
 
-    // --- LED ---------------------------------------------------------------------
+    // --- LED (lentille redessinee dans la bague du visuel) ------------------------
     const auto c = ledPos;
-    const float rLens = 26.5f, rRing = 33.5f;
+    const float rLens = 26.5f;   // lentille dans la bague du visuel (taille v1.4)
 
     if (on)
     {
-        // halo bleu glace qui scintille legerement autour de la lentille du visuel
-        ColourGradient bloom (iceMid.withAlpha (0.20f + 0.25f * (ledFlicker - 0.95f) * 20.0f * 0.25f), c.x, c.y,
-                              iceMid.withAlpha (0.0f), c.x + 60.0f, c.y, true);
+        ColourGradient bloom (mid.withAlpha (0.42f * ledFlicker), c.x, c.y,
+                              mid.withAlpha (0.0f), c.x + 62.0f, c.y, true);
         g.setGradientFill (bloom);
-        g.fillEllipse (c.x - 60.0f, c.y - 60.0f, 120.0f, 120.0f);
+        g.fillEllipse (c.x - 62.0f, c.y - 62.0f, 124.0f, 124.0f);
 
-        ColourGradient core (Colours::white.withAlpha (0.18f * ledFlicker), c.x, c.y,
-                             iceMid.withAlpha (0.10f * ledFlicker), c.x + rLens, c.y, true);
-        g.setGradientFill (core);
-        g.fillEllipse (c.x - rLens, c.y - rLens, rLens * 2.0f, rLens * 2.0f);
+        ColourGradient lens (core, c.x - 3.0f, c.y - 4.0f,
+                             deep.withMultipliedBrightness (ledFlicker), c.x + rLens, c.y + rLens * 0.3f, true);
+        lens.addColour (0.42, mid.withMultipliedBrightness (ledFlicker));
+        g.setGradientFill (lens);
     }
     else
     {
-        // LED eteinte : verre sombre bleute dans la bague du visuel
-        ColourGradient ring (Colour (0xff2b3d4a), c.x - rRing * 0.6f, c.y - rRing * 0.6f,
-                             Colour (0xff0d161d), c.x + rRing * 0.6f, c.y + rRing * 0.6f, false);
-        g.setGradientFill (ring);
-        g.fillEllipse (c.x - rRing, c.y - rRing, rRing * 2.0f, rRing * 2.0f);
-
-        ColourGradient lens (Colour (0xff3a5a6c), c.x - 6.0f, c.y - 8.0f,
-                             Colour (0xff0c1820), c.x + rLens, c.y + rLens, true);
+        ColourGradient lens (Colour (0xff3a4a54), c.x - 6.0f, c.y - 8.0f,
+                             Colour (0xff0c141a), c.x + rLens, c.y + rLens, true);
         g.setGradientFill (lens);
-        g.fillEllipse (c.x - rLens, c.y - rLens, rLens * 2.0f, rLens * 2.0f);
-
-        g.setColour (Colours::black.withAlpha (0.5f));
-        g.drawEllipse (c.x - rLens, c.y - rLens, rLens * 2.0f, rLens * 2.0f, 1.0f);
-
-        ColourGradient gl (Colours::white.withAlpha (0.35f), c.x - rLens * 0.3f, c.y - rLens * 0.6f,
-                           Colours::white.withAlpha (0.0f), c.x - rLens * 0.3f, c.y + rLens * 0.1f, false);
-        g.setGradientFill (gl);
-        g.fillEllipse (c.x - rLens * 0.7f, c.y - rLens * 0.82f, rLens * 1.1f, rLens * 0.6f);
     }
+    g.fillEllipse (c.x - rLens, c.y - rLens, rLens * 2.0f, rLens * 2.0f);
+
+    g.setColour (Colours::black.withAlpha (0.45f));
+    g.drawEllipse (c.x - rLens, c.y - rLens, rLens * 2.0f, rLens * 2.0f, 1.2f);
+
+    // reflet de verre fixe (cote lumiere)
+    ColourGradient gl (Colours::white.withAlpha (on ? 0.55f : 0.35f), c.x - rLens * 0.3f, c.y - rLens * 0.6f,
+                       Colours::white.withAlpha (0.0f), c.x - rLens * 0.3f, c.y + rLens * 0.1f, false);
+    g.setGradientFill (gl);
+    g.fillEllipse (c.x - rLens * 0.7f, c.y - rLens * 0.82f, rLens * 1.1f, rLens * 0.6f);
 }
 
 void WackdAudioProcessorEditor::drawStatus (Graphics& g)
@@ -415,20 +428,22 @@ void WackdAudioProcessorEditor::drawStatus (Graphics& g)
     if (a <= 0.0f)
         return;
 
-    g.setColour (Colours::black.withAlpha (0.52f * a));
-    g.fillRoundedRectangle (statusRect, 7.0f);
-    g.setColour (iceMid.withAlpha (0.30f * a));
-    g.drawRoundedRectangle (statusRect.reduced (0.5f), 7.0f, 1.0f);
+    const Colour accent = iceMid.interpolatedWith (ambMid, modeBlend);
 
-    g.setColour (Colour (0xffd2f3ff).withMultipliedAlpha (a));
-    g.setFont (font (12.5f, true));
+    g.setColour (Colours::black.withAlpha (0.72f * a));
+    g.fillRoundedRectangle (statusRect, 9.0f);
+    g.setColour (accent.withAlpha (0.45f * a));
+    g.drawRoundedRectangle (statusRect.reduced (0.75f), 9.0f, 1.5f);
+
+    g.setColour (Colours::white.withAlpha (a));
+    g.setFont (font (20.0f, true));
     g.drawText (lastStatus.isEmpty() ? buildStatusLine() : lastStatus,
-                statusRect.withHeight (17.0f).translated (0.0f, 2.0f), Justification::centred);
+                statusRect.withHeight (31.0f).translated (0.0f, 3.0f), Justification::centred);
 
-    g.setColour ((midiFlash > 0 ? Colours::white : Colour (0xff8fcde3)).withMultipliedAlpha (a));
-    g.setFont (font (10.5f, false));
+    g.setColour ((midiFlash > 0 ? Colours::white : accent).withMultipliedAlpha (a));
+    g.setFont (font (15.5f, true));
     g.drawText (lastPreset.isEmpty() ? buildPresetLine() : lastPreset,
-                statusRect.withTrimmedTop (17.0f).withTrimmedBottom (2.0f), Justification::centred);
+                statusRect.withTrimmedTop (31.0f).withTrimmedBottom (5.0f), Justification::centred);
 }
 
 void WackdAudioProcessorEditor::paint (Graphics& g)
@@ -529,6 +544,13 @@ void WackdAudioProcessorEditor::showContextMenu()
     menu.addSubMenu ("Save user preset", save);
     menu.addSeparator();
 
+    const bool cf7Stereo = proc.apvts.getRawParameterValue ("stereo")->load() > 0.5f;
+    PopupMenu outMenu;
+    outMenu.addItem (40, "Mono compatible (before amp sim)", true, ! cf7Stereo);
+    outMenu.addItem (41, "CF7 stereo: OUT2 inverted (after amp sim)", true, cf7Stereo);
+    menu.addSubMenu ("Output", outMenu);
+    menu.addSeparator();
+
     PopupMenu midi;
     midi.addItem (900, "CC 20  Speed",                            false);
     midi.addItem (901, "CC 21  Depth",                            false);
@@ -542,7 +564,7 @@ void WackdAudioProcessorEditor::showContextMenu()
     menu.addSubMenu ("MIDI map", midi);
 
     menu.addSeparator();
-    menu.addItem (999, "Wack'd flangerus v1.4.0 - STUDIO WIGA", false);
+    menu.addItem (999, "Wack'd flangerus v1.5.3 - STUDIO WIGA", false);
 
     menu.showMenuAsync (PopupMenu::Options().withTargetComponent (this),
         [safe = Component::SafePointer<WackdAudioProcessorEditor> (this)] (int r)
@@ -554,6 +576,11 @@ void WackdAudioProcessorEditor::showContextMenu()
             if      (r == 1) ed.setScaledHeight (defaultH);
             else if (r == 2) ed.setScaledHeight (roundToInt (baseH * 0.75f));
             else if (r == 3) ed.setScaledHeight (baseH);
+            else if (r == 40 || r == 41)
+            {
+                if (auto* prm = ed.proc.apvts.getParameter ("stereo"))
+                    prm->setValueNotifyingHost (r == 41 ? 1.0f : 0.0f);
+            }
             else if (r >= 100 && r < 200) ed.proc.applyFactoryPreset (r - 100);
             else if (r > 200 && r < 300)  ed.proc.loadUserPreset (r - 200);
             else if (r > 300 && r < 400)  ed.proc.saveUserPreset (r - 300);

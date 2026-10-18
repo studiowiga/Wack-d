@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "")
 
-project(WACKD VERSION 1.4.0 LANGUAGES C CXX)
+project(WACKD VERSION 1.5.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,7 +25,7 @@ juce_add_plugin(Wackd
     PLUGIN_CODE                 Wkcf
     FORMATS                     VST3
     PRODUCT_NAME                "Wackd"
-    VERSION                     1.4.0
+    VERSION                     1.5.3
     IS_SYNTH                    FALSE
     NEEDS_MIDI_INPUT            TRUE
     NEEDS_MIDI_OUTPUT           FALSE
@@ -35,7 +35,7 @@ juce_add_plugin(Wackd
     VST3_CATEGORIES             "Fx" "Modulation"
 )
 
-juce_add_binary_data(WackdData SOURCES background.jpg bars_lit.png mode_sw.png krazy_sw.png knob_strip.png Montserrat-Bold.ttf)
+juce_add_binary_data(WackdData SOURCES background.jpg bars_lit.png bars_lit_amber.png mode_sw.png mode_sw_r.png krazy_sw.png krazy_sw_r.png knob_strip.png Montserrat-Bold.ttf)
 set_target_properties(WackdData PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
 target_sources(Wackd PRIVATE
