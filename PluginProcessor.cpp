@@ -7,14 +7,18 @@
 static const wiga::PresetData factoryPresets[] =
 {
     //  nom                   speed depth delay regen mode krazy
-    { "Classic Chorus",        3.0f, 5.0f, 4.0f, 0.0f, 0, 0 },
-    { "Lush Stereo Chorus",    2.0f, 7.0f, 7.0f, 2.0f, 0, 0 },
-    { "Jet Flanger",           1.5f, 8.0f, 3.0f, 8.0f, 1, 0 },
-    { "Metallic Flange",       4.0f, 4.0f, 1.0f, 9.5f, 1, 0 },
-    { "Slow Deep Sweep",       0.5f, 10.f, 5.0f, 6.0f, 1, 0 },
-    { "Wack'd Vibrato",        3.0f, 4.0f, 3.0f, 0.0f, 0, 1 },
-    { "Korny Chirps",          6.5f, 6.0f, 2.0f, 7.0f, 1, 1 },
-    { "Ring Mod Madness",      9.0f, 7.0f, 5.0f, 4.0f, 0, 1 },
+    { "Classic Chorus",        3.0f, 5.0f, 4.0f, 1.0f, 0, 0 },
+    { "Lush Stereo Chorus",    2.2f, 7.0f, 7.0f, 2.0f, 0, 0 },
+    { "Jet Flanger",           2.0f, 8.0f, 2.0f, 7.5f, 1, 0 },
+    { "Metallic Flange",       4.5f, 3.0f, 0.5f, 9.0f, 1, 0 },
+    { "Slow Deep Sweep",       1.0f, 10.f, 3.0f, 6.0f, 1, 0 },
+    { "Wack'd Vibrato",        4.0f, 4.0f, 3.0f, 0.0f, 0, 1 },
+    { "Korny Chirps",          7.0f, 6.0f, 2.0f, 7.0f, 1, 1 },
+    { "Ring Mod Madness",      9.5f, 7.0f, 5.0f, 3.0f, 0, 1 },
+    // Intro de « My Way » (Limp Bizkit, 2000) : Wes Borland y utilisait un flanger
+    // Ibanez reglage « whacked » (interview MusicRadar) -> Flanger + Wack'd :
+    // son mouille, sans signal direct, ondulation moyenne et resonance metallique.
+    { "My Road",               3.2f, 5.5f, 3.0f, 4.5f, 1, 1 },
 };
 
 int WackdAudioProcessor::getNumFactoryPresets() { return (int) std::size (factoryPresets); }
@@ -93,18 +97,20 @@ void WackdAudioProcessor::prepareToPlay (double sampleRate, int)
     lfoPhase   = 0.0;
     feedback   = 0.0f;
     fbDcX = fbDcY = 0.0f;
+    fbLP = 0.0f;
 
     smoothCoef = (float) (1.0 - std::exp (-1.0 / (0.030 * sr))); // ~30 ms
     activeCoef = (float) (1.0 - std::exp (-1.0 / (0.010 * sr))); // ~10 ms
 
     smActive = pActive->load() > 0.5f ? 1.0f : 0.0f;
-    smDry    = pKrazy->load()  > 0.5f ? 0.0f : 1.0f;
 
     for (auto* f : { &preFilterA, &preFilterB, &postFilterA, &postFilterB })
     {
         f->reset();
-        f->setLowpass (sr, 8000.0);
+        f->setLowpass (sr, 9000.0);
     }
+    smWet = pKrazy->load() > 0.5f ? 1.0f : 0.72f;
+    smDry = pKrazy->load() > 0.5f ? 0.0f : 0.72f;
 }
 
 //==============================================================================
@@ -167,15 +173,23 @@ void WackdAudioProcessor::handleMidi (juce::MidiBuffer& midi)
 }
 
 //==============================================================================
-// Traitement audio
+// Traitement audio (v1.4)
 //
-// Chemin du signal de la CF7 (d'apres le schema) :
-//   entree -> IC1 (tampon) -> filtre anti-repliement -> puce numerique M50198
-//   -> filtre de reconstruction -> boucle REGEN -> sommateurs IC3 / IC2
-//   OUT1 = direct + effet      OUT2 (INV) = direct - effet
-// Le retard est module par le LFO (IC5, triangle) qui pilote l'horloge (IC6).
-// KRAZY "Wack'd" : LFO tres rapide (jusqu'au domaine audio), signal direct
-// coupe (vibrato / modulation type "ring mod"), aigus plus attenues.
+// Chemin du signal de la CF7 (schema) : tampon d'entree -> filtre anti-repliement
+// -> ligne a retard numerique M50198 (horloge modulee par le LFO triangle IC5)
+// -> filtre de reconstruction -> boucle REGEN -> sommateurs de sortie.
+//   NORMAL : OUT1 = direct + effet, OUT2 (INV) = direct - effet (stereo large).
+//   WACK'D : le signal direct est coupe (vibrato / sons « Korny »), la vitesse du
+//            LFO monte jusqu'au domaine audio (bandes laterales type ring-mod),
+//            les aigus sont plus filtres et le niveau egal au bypass.
+//
+// Choix DSP (cf. J. O. Smith, « Physical Audio Signal Processing », Flanger) :
+//   - chorus : LFO triangle arrondi (sans « cassure » de hauteur aux sommets),
+//     excursion limitee en fonction de la vitesse pour garder un desaccord musical ;
+//   - flanger : balayage exponentiel du retard (triangle sur une echelle
+//     logarithmique) -> le peigne de filtres monte et descend regulierement ;
+//   - REGEN : saturation douce + anti-DC + amortissement des aigus dans la boucle ;
+//   - aucun ecretage sur la sortie dans l'usage normal (marge de niveau).
 //==============================================================================
 void WackdAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
@@ -189,58 +203,75 @@ void WackdAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (numSamples == 0 || delayLine.empty())
         return;
 
-    // --- Lecture des reglages (0..1) ---------------------------------------
-    const float speed  = pSpeed->load() / 10.0f;
-    const float depth  = pDepth->load() / 10.0f;
-    const float dly    = pDelay->load() / 10.0f;
-    const float regen  = pRegen->load() / 10.0f;
+    const float sp = pSpeed->load() / 10.0f;
+    const float dp = pDepth->load() / 10.0f;
+    const float dl = pDelay->load() / 10.0f;
+    const float rg = pRegen->load() / 10.0f;
     const bool flanger = pMode->load()  > 0.5f;
     const bool wackd   = pKrazy->load() > 0.5f;
     const bool active  = pActive->load() > 0.5f;
 
-    // --- SPEED : vitesse du LFO -------------------------------------------
-    // Normal : 0,06 Hz .. 10 Hz ; Wack'd : 0,3 Hz .. 300 Hz (domaine audio)
-    const double rate = wackd ? 0.3  * std::pow (1000.0, (double) speed)
-                              : 0.06 * std::pow (10.0 / 0.06, (double) speed);
+    // --- SPEED ------------------------------------------------------------------
+    const double rate = wackd ? 0.5  * std::pow (240.0, (double) sp)     // 0,5 .. 120 Hz
+                              : 0.08 * std::pow (100.0, (double) sp);    // 0,08 .. 8 Hz
 
-    // --- DELAY TIME / DEPTH -----------------------------------------------
-    // DELAY TIME fixe le retard de base ; DEPTH l'amplitude du balayage.
-    // Flanger : tourner a gauche = retard plus court = resonance plus aigue.
-    double baseMs, rangeMs, cutoff, regenMax;
+    // --- DELAY TIME / DEPTH / REGEN -------------------------------------------------
+    double baseMs, excMs, cutoff, regenMax, dryG, wetG;
+    bool expoSweep;
 
     if (! flanger)
     {
-        baseMs   = wackd ? 1.5 + dly * 9.0  : 3.5 + dly * 16.5;
-        rangeMs  = depth * (wackd ? 4.0 : 6.0);
-        cutoff   = wackd ? 4200.0 : 7800.0 - dly * 2200.0;
-        regenMax = wackd ? 0.85 : 0.75;
+        expoSweep = false;
+        if (! wackd)
+        {
+            baseMs   = 4.0 + 18.0 * dl;                                   // 4 .. 22 ms
+            excMs    = dp * std::min (0.45 * baseMs, 9.0 / (rate + 0.6)); // crete a crete
+            cutoff   = 9500.0 - 2500.0 * dl;
+            regenMax = 0.60;
+            dryG = 0.72; wetG = 0.72;
+        }
+        else
+        {
+            baseMs   = 1.0 + 7.0 * dl;
+            excMs    = dp * std::min (0.9 * baseMs, 6.0 / (rate + 1.0));
+            cutoff   = 5200.0;
+            regenMax = 0.55;
+            dryG = 0.0;  wetG = 1.0;
+        }
     }
     else
     {
-        baseMs   = (wackd ? 0.15 : 0.25) + std::pow ((double) dly, 1.4) * (wackd ? 3.5 : 6.0);
-        rangeMs  = depth * (wackd ? 3.0 : 6.5);
-        cutoff   = wackd ? 4800.0 : 10500.0 - dly * 2500.0;
-        regenMax = wackd ? 0.95 : 0.92;
+        expoSweep = true;
+        if (! wackd)
+        {
+            baseMs   = 0.25 + 2.5 * std::pow ((double) dl, 1.6);         // retard mini du balayage
+            excMs    = std::min (baseMs * (1.0 + 13.0 * dp), 14.0);      // retard maxi
+            cutoff   = 12000.0 - 3000.0 * dl;
+            regenMax = 0.92;
+            dryG = 0.70; wetG = 0.70;
+        }
+        else
+        {
+            baseMs   = 0.40 + 3.0 * std::pow ((double) dl, 1.4);
+            excMs    = std::min (baseMs * (1.0 + 4.0 * dp / (1.0 + rate / 15.0)), 12.0);
+            cutoff   = 5600.0;
+            regenMax = 0.90;
+            dryG = 0.0;  wetG = 1.0;
+        }
     }
 
-    if (wackd)
-        rangeMs /= (1.0 + rate / 120.0); // le balayage se resserre aux vitesses audio
-
-    const float targetRegen = (float) (std::pow ((double) regen, 0.85) * regenMax);
-    const float targetDry   = wackd ? 0.0f : 1.0f;
+    const float targetRegen = (float) (std::pow ((double) rg, 0.8) * regenMax);
     const float targetAct   = active ? 1.0f : 0.0f;
 
-    // Filtres autour de la puce numerique (bande passante liee a l'horloge)
-    smCutoff += (float) (cutoff - smCutoff) * 0.35f;
-    preFilterA.setLowpass  (sr, smCutoff, 0.54);
-    preFilterB.setLowpass  (sr, smCutoff, 1.31);
+    smCutoff += (float) (cutoff - smCutoff) * 0.4f;
+    preFilterA.setLowpass  (sr, smCutoff * 1.3, 0.707);
     postFilterA.setLowpass (sr, smCutoff, 0.54);
     postFilterB.setLowpass (sr, smCutoff, 1.31);
+    const float dampCoef = (float) std::exp (-juce::MathConstants<double>::twoPi * 7000.0 / sr);
 
     const float* inL = buffer.getReadPointer (0);
     const float* inR = inChans > 1 ? buffer.getReadPointer (1) : inL;
 
-    // Copie de l'entree (les canaux de sortie peuvent partager la memoire)
     juce::HeapBlock<float> dryL ((size_t) numSamples), dryR ((size_t) numSamples);
     for (int i = 0; i < numSamples; ++i) { dryL[i] = inL[i]; dryR[i] = inR[i]; }
 
@@ -249,34 +280,40 @@ void WackdAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     const float msToSamples = (float) (sr / 1000.0);
     const float maxDelaySamples = (float) (delayMask - 4);
-    const float quant = 4096.0f; // grain numerique leger (puce a modulation delta)
+
+    auto safety = [] (float x)
+    {
+        const float a = std::abs (x);
+        if (a < 0.95f) return x;
+        return std::copysign (0.95f + 0.05f * std::tanh ((a - 0.95f) / 0.05f), x);
+    };
 
     for (int i = 0; i < numSamples; ++i)
     {
-        // Lissage des commandes (pas de "zipper")
-        smRate    += ((float) rate    - smRate)    * smoothCoef;
-        smBaseMs  += ((float) baseMs  - smBaseMs)  * smoothCoef;
-        smRangeMs += ((float) rangeMs - smRangeMs) * smoothCoef;
-        smRegen   += (targetRegen - smRegen)       * smoothCoef;
-        smDry     += (targetDry   - smDry)         * smoothCoef;
-        smActive  += (targetAct   - smActive)      * activeCoef;
+        smRate    += ((float) rate   - smRate)    * smoothCoef;
+        smBaseMs  += ((float) baseMs - smBaseMs)  * smoothCoef;
+        smRangeMs += ((float) excMs  - smRangeMs) * smoothCoef;
+        smRegen   += (targetRegen    - smRegen)   * smoothCoef;
+        smDry     += ((float) dryG   - smDry)     * smoothCoef;
+        smWet     += ((float) wetG   - smWet)     * smoothCoef;
+        smActive  += (targetAct      - smActive)  * activeCoef;
 
-        // LFO triangle (integrateur + trigger de Schmitt sur la pedale)
+        // LFO : triangle (comme IC5) aux sommets arrondis
         lfoPhase += smRate / sr;
         if (lfoPhase >= 1.0) lfoPhase -= std::floor (lfoPhase);
-        const float tri01 = (float) (lfoPhase < 0.5 ? lfoPhase * 2.0 : 2.0 - lfoPhase * 2.0);
+        const float tri  = (float) (lfoPhase < 0.5 ? lfoPhase * 2.0 : 2.0 - lfoPhase * 2.0);
+        const float sine = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * tri);
+        const float lfo  = expoSweep ? 0.75f * tri + 0.25f * sine : 0.35f * tri + 0.65f * sine;
 
-        // Entree mono (la CF7 a une seule entree)
         const float in = 0.5f * (dryL[i] + dryR[i]);
 
-        // Ecriture dans la ligne a retard (avec REGEN)
-        float toChip = in + feedback * smRegen;
-        toChip = preFilterB.process (preFilterA.process (toChip));
-        delayLine[(size_t) writeIndex] = toChip;
+        // ecriture (avec REGEN) apres le filtre anti-repliement
+        delayLine[(size_t) writeIndex] = preFilterA.process (in + feedback * smRegen);
 
-        // Lecture modulee (interpolation d'Hermite)
-        float dSamp = (smBaseMs + smRangeMs * tri01) * msToSamples;
-        dSamp = juce::jlimit (1.0f, maxDelaySamples, dSamp);
+        // retard courant
+        float dMs = expoSweep ? smBaseMs * std::pow (std::max (smRangeMs, smBaseMs) / smBaseMs, lfo)
+                              : smBaseMs + smRangeMs * (lfo - 0.5f);
+        float dSamp = juce::jlimit (2.0f, maxDelaySamples, dMs * msToSamples);
 
         const float readPos = (float) writeIndex - dSamp;
         const int   idx     = (int) std::floor (readPos);
@@ -294,38 +331,30 @@ void WackdAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         writeIndex = (writeIndex + 1) & delayMask;
 
-        // Filtre de reconstruction + grain numerique
         wet = postFilterB.process (postFilterA.process (wet));
-        wet = std::round (wet * quant) / quant;
 
-        // Boucle de reinjection (saturation douce de l'ampli op + anti-DC)
-        const float fbIn = std::tanh (wet);
-        fbDcY = fbIn - fbDcX + 0.995f * fbDcY;
-        fbDcX = fbIn;
-        feedback = fbDcY;
+        // boucle REGEN : saturation douce, anti-DC, amortissement des aigus
+        float fb = std::tanh (wet * 1.2f) * (1.0f / 1.2f);
+        fbDcY = fb - fbDcX + 0.995f * fbDcY;
+        fbDcX = fb;
+        fbLP  = fbDcY + dampCoef * (fbLP - fbDcY);
+        feedback = fbLP;
 
-        // Sommateurs de sortie : OUT1 = direct + effet ; OUT2 (INV) = direct - effet
-        const float dry  = in * smDry;
-        const float out1 = dry + wet;
-        const float out2 = dry - wet;
-
-        auto soft = [] (float x)
-        {
-            const float a = std::abs (x);
-            if (a < 0.9f) return x;
-            return std::copysign (0.9f + 0.1f * std::tanh ((a - 0.9f) / 0.1f), x);
-        };
+        const float dry = in * smDry;
+        const float w   = wet * smWet;
+        // Normal : OUT2 inverse l'effet (comme la pedale). Wack'd (sans direct) :
+        // meme polarite sur les deux sorties pour rester compatible mono.
+        const float wetR = w * (1.0f - 2.0f * juce::jlimit (0.0f, 1.0f, smDry / 0.72f));
 
         const float a = smActive;
-
         if (outR != nullptr)
         {
-            outL[i] = dryL[i] * (1.0f - a) + soft (out1) * a;
-            outR[i] = dryR[i] * (1.0f - a) + soft (out2) * a;
+            outL[i] = dryL[i] * (1.0f - a) + safety (dry + w)    * a;
+            outR[i] = dryR[i] * (1.0f - a) + safety (dry + wetR) * a;
         }
         else
         {
-            outL[i] = dryL[i] * (1.0f - a) + soft (out1) * a;
+            outL[i] = dryL[i] * (1.0f - a) + safety (dry + w) * a;
         }
     }
 

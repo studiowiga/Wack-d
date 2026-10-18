@@ -77,7 +77,7 @@ public:
 
     // Repere de reference (100 %) ; taille par defaut = taille minimale
     static constexpr int baseW = 760;
-    static constexpr int baseH = 1080;
+    static constexpr int baseH = 958;
     static constexpr int defaultH = 493;
 
 private:

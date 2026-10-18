@@ -77,7 +77,7 @@ public:
     bool acceptsMidi() const override  { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.5; }
+    double getTailLengthSeconds() const override { return 0.3; }
 
     //==========================================================================
     int getNumPrograms() override;
@@ -150,7 +150,9 @@ private:
     float  smBaseMs   = 5.0f;
     float  smRangeMs  = 2.0f;
     float  smRegen    = 0.0f;
-    float  smDry      = 1.0f;
+    float  smDry      = 0.72f;
+    float  smWet      = 0.72f;
+    float  fbLP       = 0.0f;
     float  smActive   = 1.0f;
     float  smCutoff   = 8000.0f;
     float  feedback   = 0.0f;

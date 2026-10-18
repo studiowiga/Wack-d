@@ -20,26 +20,26 @@ namespace
     }
 
     // Positions dans le repere de reference 760 x 1080 (visuel Wack'd sur fond noir)
-    const float knobY = 209.0f;
+    const float knobY = 148.0f;
     const float knobX[4] = { 169.5f, 311.5f, 454.0f, 597.0f };   // centres des potards
     const float knobR = 56.0f;                                   // rayon de la jupe moletee
     const float knobStripHalf = 1.20f;                           // marge de l'image (ombre)
     const int   knobFrames = 128;
 
-    const Rectangle<float> modeRect  { 179.0f, 378.0f, 83.0f, 40.0f };
-    const Rectangle<float> krazyRect { 499.0f, 378.0f, 83.0f, 40.0f };
-    const Point<float>     ledPos    { 379.5f, 395.5f };
-    const Rectangle<float> barsArea  { 319.0f, 429.0f, 121.0f, 57.0f };
+    const Rectangle<float> modeRect  { 179.0f, 317.0f, 83.0f, 40.0f };
+    const Rectangle<float> krazyRect { 499.0f, 317.0f, 83.0f, 40.0f };
+    const Point<float>     ledPos    { 379.5f, 334.5f };
+    const Rectangle<float> barsArea  { 319.0f, 368.0f, 121.0f, 57.0f };
     const float slots[9][4] =
     {
-        { 327.0f, 437.0f, 335.5f, 476.5f }, { 339.5f, 446.0f, 347.5f, 476.5f }, { 351.5f, 451.5f, 359.5f, 476.5f },
-        { 363.5f, 455.0f, 371.5f, 476.5f }, { 375.5f, 456.0f, 383.5f, 476.5f }, { 387.5f, 455.0f, 395.5f, 476.5f },
-        { 399.5f, 451.5f, 407.0f, 476.0f }, { 412.0f, 445.0f, 419.5f, 476.5f }, { 424.0f, 437.0f, 431.5f, 476.5f }
+        { 327.0f, 376.0f, 335.5f, 415.5f }, { 339.5f, 385.0f, 347.5f, 415.5f }, { 351.5f, 390.5f, 359.5f, 415.5f },
+        { 363.5f, 394.0f, 371.5f, 415.5f }, { 375.5f, 395.0f, 383.5f, 415.5f }, { 387.5f, 394.0f, 395.5f, 415.5f },
+        { 399.5f, 390.5f, 407.0f, 415.0f }, { 412.0f, 384.0f, 419.5f, 415.5f }, { 424.0f, 376.0f, 431.5f, 415.5f }
     };
-    const Rectangle<float> statusRect{ 218.5f, 484.0f, 322.0f, 34.0f };
-    const Point<float>     footPos   { 379.0f, 879.0f };
+    const Rectangle<float> statusRect{ 218.5f, 423.0f, 322.0f, 34.0f };
+    const Point<float>     footPos   { 379.0f, 818.0f };
     const float            footR     = 50.0f;
-    const Rectangle<float> brandRect { 259.0f, 932.0f, 240.0f, 34.0f };
+    const Rectangle<float> brandRect { 259.0f, 871.0f, 240.0f, 34.0f };
 
     const Colour iceCore  (0xffeafaff);
     const Colour iceMid   (0xffa9e9ff);
@@ -538,11 +538,11 @@ void WackdAudioProcessorEditor::showContextMenu()
     midi.addItem (905, "CC 25  Krazy (0-63 Normal / 64+ Wack'd)", false);
     midi.addItem (906, "CC 26  Footswitch (64+ ON / 0-63 OFF)",   false);
     midi.addItem (907, "CC 27  Footswitch toggle (each press)",   false);
-    midi.addItem (908, "Program Change 1-8  Factory presets",     false);
+    midi.addItem (908, "Program Change 1-9  Factory presets",     false);
     menu.addSubMenu ("MIDI map", midi);
 
     menu.addSeparator();
-    menu.addItem (999, "Wack'd flangerus v1.3.8 - STUDIO WIGA", false);
+    menu.addItem (999, "Wack'd flangerus v1.4.0 - STUDIO WIGA", false);
 
     menu.showMenuAsync (PopupMenu::Options().withTargetComponent (this),
         [safe = Component::SafePointer<WackdAudioProcessorEditor> (this)] (int r)
