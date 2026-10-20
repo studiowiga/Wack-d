@@ -38,7 +38,7 @@ Sources : effectsdatabase.com (fiche et manuel CF7), mirosol.kapsi.fi (puce M501
 - **Potards** : noirs sobres, rendu haute définition pré-calculé (128 positions) : calotte noire usinée, jupe moletée noire, repère blanc ; la lumière reste fixe en haut à gauche, seuls le repère et le moletage tournent.
 - **LED et jauge** : bleu glace en Chorus, jaune-orangé (même intensité) en Flanger ; la jauge sous la LED s'allume de gauche (0 %) à droite (100 %) selon le dernier potard tourné.
 - **Switchs MODE / KRAZY** : le levier se déplace réellement (gauche = Chorus / Normal, droite = Flanger / Wack'd).
-- **Indication d'alimentation** centrée en haut de la pédale.
+- Pas d'indication d'alimentation (DC9V) en haut de la pédale.
 - **Ligne d'état** agrandie sous la LED (texte 20 px / 15,5 px à 100 %) : elle n'apparaît que lorsqu'un potard bouge, reste 2,5 s puis s'efface en fondu.
 - **STUDIO WIGA** sous le footswitch, dans la police du logo Studio Wiga (Montserrat Bold, licence libre OFL), imprimé dans la même encre que « Wack'd » et « flangerus », avec un léger voile couleur papier dessous pour rester lisible sur le dessin.
 - **Prises jack** : mêmes écrous chromés que la pédale Textural (OUT1 et INV. OUT2 à gauche, IN à droite).
