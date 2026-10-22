@@ -74,6 +74,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    void parentHierarchyChanged() override;
 
     // Repere de reference (100 %) ; taille par defaut = taille minimale
     static constexpr int baseW = 760;
@@ -82,6 +83,7 @@ public:
 
 private:
     void timerCallback() override;
+    void useSoftwareRenderer();
     void showContextMenu();
     void setScaledHeight (int h);
     void updateBars (double dt);
@@ -127,6 +129,12 @@ private:
     float meterLevel = 0.0f;
     int lastMidiCount = 0;
     int midiFlash = 0;
+
+    // dernier etat reellement dessine : on ne redessine une zone que si elle a change
+    float drawnBarFill[numBars], drawnBarSpark[numBars];
+    float drawnFlicker = -1.0f, drawnLedBlend = -1.0f, drawnStatusAlpha = -1.0f, drawnStatusBlend = -1.0f;
+    int   drawnLedOn = -1, drawnMidiFlash = -1;
+    juce::String drawnStatusText, drawnPresetText;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WackdAudioProcessorEditor)
 };

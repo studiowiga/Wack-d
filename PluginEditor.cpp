@@ -195,6 +195,9 @@ WackdAudioProcessorEditor::WackdAudioProcessorEditor (WackdAudioProcessor& p)
         cons->setFixedAspectRatio ((double) baseW / (double) baseH);
     setSize (defaultW, defaultH);
 
+    for (int i = 0; i < numBars; ++i)
+        drawnBarFill[i] = drawnBarSpark[i] = -1.0f;   // premier tic : tout est redessine
+
     lastTime = Time::getMillisecondCounterHiRes();
     startTimerHz (30);
 }
@@ -209,6 +212,28 @@ WackdAudioProcessorEditor::~WackdAudioProcessorEditor()
     }
     for (auto* c : { (Component*) &modeSwitch, (Component*) &krazySwitch, (Component*) &footswitch })
         c->removeMouseListener (&rightClickFwd);
+}
+
+//==============================================================================
+// Anti-gel de la fenetre (Windows) : JUCE 8 dessine par defaut avec Direct2D (carte graphique).
+// Avec certains pilotes (Intel notamment) la fenetre du plugin cesse de se rafraichir alors que
+// le DAW continue de tourner. Le moteur logiciel est stable partout et largement assez rapide ici.
+void WackdAudioProcessorEditor::useSoftwareRenderer()
+{
+   #if JUCE_WINDOWS
+    if (auto* peer = getPeer())
+    {
+        int sw = peer->getAvailableRenderingEngines().indexOf ("Software Renderer");
+        if (sw < 0) sw = 0;
+        if (peer->getCurrentRenderingEngine() != sw)
+            peer->setCurrentRenderingEngine (sw);
+    }
+   #endif
+}
+
+void WackdAudioProcessorEditor::parentHierarchyChanged()
+{
+    useSoftwareRenderer();
 }
 
 void WackdAudioProcessorEditor::setScaledHeight (int h)
@@ -350,9 +375,44 @@ void WackdAudioProcessorEditor::timerCallback()
         if (std::abs (target - modeBlend) < 0.002f) modeBlend = target;
     }
 
-    // On ne redessine que la LED, les barres et la ligne d'etat
-    repaint (scaled ({ ledPos.x - 60.0f, ledPos.y - 60.0f, 120.0f, 100.0f }).getUnion (scaled (barsArea.expanded (8.0f)))
-                 .getUnion (scaled (statusRect.expanded (4.0f))));
+    useSoftwareRenderer();   // au cas ou la fenetre a ete recreee par l'hote (changement d'ecran, d'echelle...)
+
+    // On ne redessine la LED, les barres et la ligne d'etat que si ce qu'elles affichent a change
+    // (zero travail au repos ; quand l'effet est actif, le scintillement continue normalement)
+    auto changed = [] (float& drawn, float now) { if (std::abs (drawn - now) < 0.002f) return false; drawn = now; return true; };
+
+    bool ledDirty = false;
+    {
+        const int on = footswitch.isOn() ? 1 : 0;
+        if (on != drawnLedOn) { drawnLedOn = on; ledDirty = true; }
+        ledDirty |= changed (drawnFlicker, ledFlicker);
+        ledDirty |= changed (drawnLedBlend, modeBlend);
+        for (int i = 0; i < numBars; ++i)
+        {
+            ledDirty |= changed (drawnBarFill[i], barFill[i]);
+            ledDirty |= changed (drawnBarSpark[i], barSpark[i]);
+        }
+    }
+
+    bool statusDirty = changed (drawnStatusAlpha, statusAlpha);
+    if (statusAlpha > 0.0f)
+    {
+        const int mf = midiFlash > 0 ? 1 : 0;
+        if (mf != drawnMidiFlash)            { drawnMidiFlash = mf; statusDirty = true; }
+        if (lastStatus != drawnStatusText)   { drawnStatusText = lastStatus; statusDirty = true; }
+        if (lastPreset != drawnPresetText)   { drawnPresetText = lastPreset; statusDirty = true; }
+        statusDirty |= changed (drawnStatusBlend, modeBlend);
+    }
+    else if (drawnStatusAlpha == 0.0f)
+    {
+        // ligne masquee : on oublie le dernier texte pour la redessiner a sa reapparition
+        drawnMidiFlash = -1; drawnStatusText.clear(); drawnPresetText.clear(); drawnStatusBlend = -1.0f;
+    }
+
+    if (ledDirty)
+        repaint (scaled ({ ledPos.x - 60.0f, ledPos.y - 60.0f, 120.0f, 100.0f }).getUnion (scaled (barsArea.expanded (8.0f))));
+    if (statusDirty)
+        repaint (scaled (statusRect.expanded (4.0f)));
 }
 
 //==============================================================================
@@ -564,7 +624,7 @@ void WackdAudioProcessorEditor::showContextMenu()
     menu.addSubMenu ("MIDI map", midi);
 
     menu.addSeparator();
-    menu.addItem (999, "Wack'd flangerus v1.5.4 - STUDIO WIGA", false);
+    menu.addItem (999, "Wack'd flangerus v1.5.5 - STUDIO WIGA", false);
 
     menu.showMenuAsync (PopupMenu::Options().withTargetComponent (this),
         [safe = Component::SafePointer<WackdAudioProcessorEditor> (this)] (int r)
