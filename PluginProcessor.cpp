@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cstring>
 
 //==============================================================================
 // Presets d'usine — reglages notes comme sur la pedale (0 a 10)
@@ -42,6 +43,18 @@ WackdAudioProcessor::WackdAudioProcessor()
     pKrazy  = apvts.getRawParameterValue ("krazy");
     pActive = apvts.getRawParameterValue ("active");
     pStereo = apvts.getRawParameterValue ("stereo");
+
+    for (int i = 0; i < numQueued; ++i)
+    {
+        pendingValue[i].store (0.0f);
+        pendingSet[i].store (false);
+    }
+    startTimerHz (60);
+}
+
+WackdAudioProcessor::~WackdAudioProcessor()
+{
+    stopTimer();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout WackdAudioProcessor::createLayout()
@@ -86,8 +99,10 @@ bool WackdAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) co
 }
 
 //==============================================================================
-void WackdAudioProcessor::prepareToPlay (double sampleRate, int)
+void WackdAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    dryBufL.assign ((size_t) juce::jmax (samplesPerBlock, 4096), 0.0f);   // anti-gel v2 : pas d'allocation dans processBlock
+    dryBufR.assign (dryBufL.size(), 0.0f);
     sr = sampleRate;
 
     // 60 ms de memoire largement suffisants (retard maxi ~ 28 ms)
@@ -125,6 +140,45 @@ void WackdAudioProcessor::setParam (const juce::String& id, float plainValue)
         p->setValueNotifyingHost (p->convertTo0to1 (plainValue));
 }
 
+// Anti-gel v2 (Studio Wiga) : jamais d'appel a l'hote (setValueNotifyingHost) depuis le thread audio.
+// Le MIDI met la valeur en file ; un timer du thread de messages la transmet au DAW.
+const char* WackdAudioProcessor::queuedId (int i)
+{
+    static const char* ids[numQueued] = { "speed", "depth", "delay", "regen", "mode", "krazy", "active" };
+    return ids[juce::jlimit (0, numQueued - 1, i)];
+}
+
+void WackdAudioProcessor::setParamFromAudio (const char* id, float plain)
+{
+    for (int i = 0; i < numQueued; ++i)
+        if (std::strcmp (id, queuedId (i)) == 0)
+        {
+            pendingValue[i].store (plain, std::memory_order_relaxed);
+            pendingSet[i].store (true, std::memory_order_release);
+            return;
+        }
+}
+
+float WackdAudioProcessor::queuedOrCurrent (const char* id, std::atomic<float>* current) const
+{
+    for (int i = 0; i < numQueued; ++i)
+        if (std::strcmp (id, queuedId (i)) == 0 && pendingSet[i].load (std::memory_order_acquire))
+            return pendingValue[i].load (std::memory_order_relaxed);
+    return current->load (std::memory_order_relaxed);
+}
+
+void WackdAudioProcessor::timerCallback()
+{
+    const int preset = pendingPreset.exchange (-1);
+    if (preset >= 0)
+        applyFactoryPreset (preset);
+
+    for (int i = 0; i < numQueued; ++i)
+        if (pendingSet[i].exchange (false, std::memory_order_acquire))
+            if (auto* prm = apvts.getParameter (queuedId (i)))
+                prm->setValueNotifyingHost (prm->convertTo0to1 (pendingValue[i].load (std::memory_order_relaxed)));
+}
+
 void WackdAudioProcessor::handleMidi (juce::MidiBuffer& midi)
 {
     for (const auto meta : midi)
@@ -140,16 +194,16 @@ void WackdAudioProcessor::handleMidi (juce::MidiBuffer& midi)
             bool known = true;
             switch (cc)
             {
-                case ccSpeed:      setParam ("speed", knobValue);           break;
-                case ccDepth:      setParam ("depth", knobValue);           break;
-                case ccDelayTime:  setParam ("delay", knobValue);           break;
-                case ccRegen:      setParam ("regen", knobValue);           break;
-                case ccMode:       setParam ("mode",  v >= 64 ? 1.0f : 0.0f);  break;
-                case ccKrazy:      setParam ("krazy", v >= 64 ? 1.0f : 0.0f);  break;
-                case ccFootswitch: setParam ("active", v >= 64 ? 1.0f : 0.0f); break;
+                case ccSpeed:      setParamFromAudio ("speed", knobValue);           break;
+                case ccDepth:      setParamFromAudio ("depth", knobValue);           break;
+                case ccDelayTime:  setParamFromAudio ("delay", knobValue);           break;
+                case ccRegen:      setParamFromAudio ("regen", knobValue);           break;
+                case ccMode:       setParamFromAudio ("mode",  v >= 64 ? 1.0f : 0.0f);  break;
+                case ccKrazy:      setParamFromAudio ("krazy", v >= 64 ? 1.0f : 0.0f);  break;
+                case ccFootswitch: setParamFromAudio ("active", v >= 64 ? 1.0f : 0.0f); break;
                 case ccFootToggle:
                     if (v >= 64 && prevToggleValue < 64)
-                        setParam ("active", pActive->load() > 0.5f ? 0.0f : 1.0f);
+                        setParamFromAudio ("active", queuedOrCurrent ("active", pActive) > 0.5f ? 0.0f : 1.0f);
                     prevToggleValue = v;
                     break;
                 default: known = false; break;
@@ -166,7 +220,7 @@ void WackdAudioProcessor::handleMidi (juce::MidiBuffer& midi)
         {
             const int prog = m.getProgramChangeNumber();
             if (prog < getNumFactoryPresets())
-                applyFactoryPreset (prog);
+                pendingPreset.store (prog);      // applique par le timer (thread de messages)
 
             lastMidiProgram = prog;
             lastMidiCC      = -2; // indique un Program Change
@@ -202,14 +256,14 @@ void WackdAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (numSamples == 0 || delayLine.empty())
         return;
 
-    const float sp = pSpeed->load() / 10.0f;
-    const float dp = pDepth->load() / 10.0f;
-    const float dl = pDelay->load() / 10.0f;
-    const float rg = pRegen->load() / 10.0f;
-    const bool flanger   = pMode->load()   > 0.5f;
-    const bool wackd     = pKrazy->load()  > 0.5f;
-    const bool active    = pActive->load() > 0.5f;
-    const bool cf7Stereo = pStereo->load() > 0.5f;
+    const float sp = pSpeed->load (std::memory_order_relaxed) / 10.0f;
+    const float dp = pDepth->load (std::memory_order_relaxed) / 10.0f;
+    const float dl = pDelay->load (std::memory_order_relaxed) / 10.0f;
+    const float rg = pRegen->load (std::memory_order_relaxed) / 10.0f;
+    const bool flanger   = pMode->load (std::memory_order_relaxed)   > 0.5f;
+    const bool wackd     = pKrazy->load (std::memory_order_relaxed)  > 0.5f;
+    const bool active    = pActive->load (std::memory_order_relaxed) > 0.5f;
+    const bool cf7Stereo = pStereo->load (std::memory_order_relaxed) > 0.5f;
 
     // --- SPEED (triangle, plage 1:100 en Normal) -------------------------------------
     double rate;
@@ -277,7 +331,9 @@ void WackdAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float* inL = buffer.getReadPointer (0);
     const float* inR = inChans > 1 ? buffer.getReadPointer (1) : inL;
 
-    juce::HeapBlock<float> dryL ((size_t) numSamples), dryR ((size_t) numSamples);
+    if (dryBufL.size() < (size_t) numSamples) { dryBufL.resize ((size_t) numSamples); dryBufR.resize ((size_t) numSamples); }   // rare : bloc plus grand qu'annonce
+    float* dryL = dryBufL.data();
+    float* dryR = dryBufR.data();
     for (int i = 0; i < numSamples; ++i) { dryL[i] = inL[i]; dryR[i] = inR[i]; }
 
     float* outL = buffer.getWritePointer (0);

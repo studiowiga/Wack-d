@@ -193,7 +193,10 @@ WackdAudioProcessorEditor::WackdAudioProcessorEditor (WackdAudioProcessor& p)
     setResizeLimits (defaultW, defaultH, baseW * 3 / 2, baseH * 3 / 2);
     if (auto* cons = getConstrainer())
         cons->setFixedAspectRatio ((double) baseW / (double) baseH);
+    setOpaque (true);                      // anti-gel : l'hote ne redessine jamais ce qui est derriere la fenetre
     setSize (defaultW, defaultH);
+    rebuildBrand();
+    rebuildCaches();
 
     for (int i = 0; i < numBars; ++i)
         drawnBarFill[i] = drawnBarSpark[i] = -1.0f;   // premier tic : tout est redessine
@@ -218,10 +221,21 @@ WackdAudioProcessorEditor::~WackdAudioProcessorEditor()
 // Anti-gel de la fenetre (Windows) : JUCE 8 dessine par defaut avec Direct2D (carte graphique).
 // Avec certains pilotes (Intel notamment) la fenetre du plugin cesse de se rafraichir alors que
 // le DAW continue de tourner. Le moteur logiciel est stable partout et largement assez rapide ici.
+//
+// Anti-gel v2 (Studio Wiga) :
+//  1. moteur de rendu logiciel force sur Windows, applique a chaque nouvelle fenetre hote (peer)
+//     et reverifie toutes les secondes, jamais en boucle ;
+//  2. aucun calcul lourd dans paint() : le fond est mis a la taille d'affichage par le timer seulement,
+//     apres stabilisation de la taille ou quand l'echelle d'affichage change (au plus toutes les 250 ms) ;
+//  3. chien de garde : si un redessin demande n'est pas arrive au bout de 1,5 s alors que la fenetre est
+//     visible, le moteur de rendu est reapplique et toute la fenetre est redessinee ;
+//  4. cote audio : aucun appel a l'hote ni allocation depuis le thread audio (voir PluginProcessor).
 void WackdAudioProcessorEditor::useSoftwareRenderer()
 {
+    auto* peer = getPeer();
+    if (peer != lastPeer) { lastPeer = peer; repaint(); }
    #if JUCE_WINDOWS
-    if (auto* peer = getPeer())
+    if (peer != nullptr)
     {
         int sw = peer->getAvailableRenderingEngines().indexOf ("Software Renderer");
         if (sw < 0) sw = 0;
@@ -234,6 +248,43 @@ void WackdAudioProcessorEditor::useSoftwareRenderer()
 void WackdAudioProcessorEditor::parentHierarchyChanged()
 {
     useSoftwareRenderer();
+}
+
+void WackdAudioProcessorEditor::visibilityChanged()
+{
+    useSoftwareRenderer();
+    if (isShowing())
+        repaint();
+}
+
+void WackdAudioProcessorEditor::askRepaint (Rectangle<int> r)
+{
+    if (repaintAskedMs <= 0.0) repaintAskedMs = Time::getMillisecondCounterHiRes();
+    repaint (r);
+}
+
+float WackdAudioProcessorEditor::physicalScale() const
+{
+    return jlimit (1.0f, 4.0f, (float) Component::getApproximateScaleFactorForComponent (this));
+}
+
+// Cache d'affichage : fond deja a la taille de la fenetre (pixels physiques) -> plus de
+// re-echantillonnage de l'image d'origine a chaque rafraichissement.
+void WackdAudioProcessorEditor::rebuildCaches (float sc)
+{
+    if (sc <= 0.0f)
+        sc = cacheScale > 0.0f ? cacheScale : physicalScale();
+    const int w = getWidth(), h = getHeight();
+    if (w <= 0 || h <= 0 || ! background.isValid())
+        return;
+    if (w == cacheW && h == cacheH && std::abs (sc - cacheScale) < 0.01f && bgScaled.isValid())
+        return;
+
+    cacheW = w; cacheH = h; cacheScale = sc;
+    const int pw = roundToInt ((float) w * sc), ph = roundToInt ((float) h * sc);
+    bgScaled = (pw >= background.getWidth()) ? background
+                                             : background.rescaled (pw, ph, Graphics::highResamplingQuality);
+    repaint();
 }
 
 void WackdAudioProcessorEditor::setScaledHeight (int h)
@@ -258,6 +309,10 @@ void WackdAudioProcessorEditor::resized()
     modeSwitch.setBounds  (scaled (modeRect));
     krazySwitch.setBounds (scaled (krazyRect));
     footswitch.setBounds  (scaled ({ footPos.x - footR, footPos.y - footR, footR * 2.0f, footR * 2.0f }));
+
+    // anti-gel : jamais de setSize ici (les limites du constrainer suffisent) ;
+    // pendant un redimensionnement a la souris, on attend que la taille se stabilise
+    resizeSettle = 4;
 }
 
 //==============================================================================
@@ -375,7 +430,28 @@ void WackdAudioProcessorEditor::timerCallback()
         if (std::abs (target - modeBlend) < 0.002f) modeBlend = target;
     }
 
-    useSoftwareRenderer();   // au cas ou la fenetre a ete recreee par l'hote (changement d'ecran, d'echelle...)
+    // au cas ou la fenetre a ete recreee par l'hote (changement d'ecran, d'echelle...) : au plus 1 fois par seconde
+    if (getPeer() != lastPeer || now - lastRendererCheckMs > 1000.0) { lastRendererCheckMs = now; useSoftwareRenderer(); }
+
+    // cache du fond : reconstruit ici seulement (jamais dans paint)
+    if (resizeSettle > 0 && --resizeSettle == 0)
+        rebuildCaches();
+    else if (resizeSettle == 0 && now - lastScaleCheckMs > 250.0)
+    {
+        lastScaleCheckMs = now;
+        const float sc = physicalScale();
+        if (std::abs (sc - cacheScale) > 0.01f)
+            rebuildCaches (sc);
+    }
+
+    // chien de garde : un redessin demande n'arrive pas -> on relance le moteur de rendu et on redessine tout
+    if (repaintAskedMs > 0.0 && isShowing() && now - repaintAskedMs > 1500.0 && lastPaintMs < repaintAskedMs)
+    {
+        repaintAskedMs = 0.0;
+        lastPeer = nullptr;
+        useSoftwareRenderer();
+        repaint();
+    }
 
     // On ne redessine la LED, les barres et la ligne d'etat que si ce qu'elles affichent a change
     // (zero travail au repos ; quand l'effet est actif, le scintillement continue normalement)
@@ -410,9 +486,9 @@ void WackdAudioProcessorEditor::timerCallback()
     }
 
     if (ledDirty)
-        repaint (scaled ({ ledPos.x - 60.0f, ledPos.y - 60.0f, 120.0f, 100.0f }).getUnion (scaled (barsArea.expanded (8.0f))));
+        askRepaint (scaled ({ ledPos.x - 60.0f, ledPos.y - 60.0f, 120.0f, 100.0f }).getUnion (scaled (barsArea.expanded (8.0f))));
     if (statusDirty)
-        repaint (scaled (statusRect.expanded (4.0f)));
+        askRepaint (scaled (statusRect.expanded (4.0f)));
 }
 
 //==============================================================================
@@ -508,10 +584,15 @@ void WackdAudioProcessorEditor::drawStatus (Graphics& g)
 
 void WackdAudioProcessorEditor::paint (Graphics& g)
 {
+    lastPaintMs = Time::getMillisecondCounterHiRes();
+    repaintAskedMs = 0.0;
     g.fillAll (Colours::black);
-    g.setImageResamplingQuality (Graphics::highResamplingQuality);
-    if (background.isValid())
-        g.drawImage (background, getLocalBounds().toFloat());
+    // anti-gel : aucun rescale ici, on dessine le cache existant (ou l'original en attendant le timer)
+    const Image& bg = bgScaled.isValid() ? bgScaled : background;
+    g.setImageResamplingQuality (bg.getWidth() == background.getWidth() ? Graphics::highResamplingQuality
+                                                                         : Graphics::lowResamplingQuality);
+    if (bg.isValid())
+        g.drawImage (bg, getLocalBounds().toFloat());
 
     const float s = (float) getHeight() / (float) baseH;
     g.addTransform (AffineTransform::scale (s));
@@ -547,7 +628,7 @@ void WackdAudioProcessorEditor::rebuildBrand()
 void WackdAudioProcessorEditor::drawBrand (Graphics& g)
 {
     if (brandPath.isEmpty())
-        rebuildBrand();
+        return;                            // anti-gel : chemin prepare dans le constructeur, jamais ici
 
     // voile creme (couleur du fond de la pedale) sous les lettres, comme sous le titre :
     // garde la lecture nette au-dessus des traits bleu-vert du dessin
@@ -624,7 +705,7 @@ void WackdAudioProcessorEditor::showContextMenu()
     menu.addSubMenu ("MIDI map", midi);
 
     menu.addSeparator();
-    menu.addItem (999, "Wack'd flangerus v1.5.5 - STUDIO WIGA", false);
+    menu.addItem (999, "Wack'd flangerus v1.6.0 - STUDIO WIGA", false);
 
     menu.showMenuAsync (PopupMenu::Options().withTargetComponent (this),
         [safe = Component::SafePointer<WackdAudioProcessorEditor> (this)] (int r)

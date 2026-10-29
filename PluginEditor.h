@@ -75,6 +75,7 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
     void parentHierarchyChanged() override;
+    void visibilityChanged() override;
 
     // Repere de reference (100 %) ; taille par defaut = taille minimale
     static constexpr int baseW = 760;
@@ -99,6 +100,16 @@ private:
     NickelKnobLookAndFeel lnf;
     RightClickForwarder rightClickFwd;
     juce::Image background, barsLit, barsLitAmber;
+    // anti-gel v2 : fond deja a la taille d'affichage (refait par le timer), suivi de la fenetre hote et des redessins
+    juce::Image bgScaled;
+    int cacheW = 0, cacheH = 0;
+    float cacheScale = 0.0f;
+    int resizeSettle = 0;
+    void* lastPeer = nullptr;
+    double lastPaintMs = 0.0, repaintAskedMs = 0.0, lastScaleCheckMs = 0.0, lastRendererCheckMs = 0.0;
+    void rebuildCaches (float scale = 0.0f);
+    float physicalScale() const;
+    void askRepaint (juce::Rectangle<int> r);
     float modeBlend = 0.0f;      // 0 = chorus (bleu), 1 = flanger (jaune-orange)
 
     // « STUDIO WIGA » (police du logo)

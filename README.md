@@ -78,3 +78,7 @@ Depuis la v1.5, la sortie par défaut est **Mono compatible** : la droite utilis
 - Gain contrôlé, aucun écrêtage en usage normal.
 
 Référence DSP : J. O. Smith, *Physical Audio Signal Processing* (CCRMA), chapitre Flanger.
+
+## Nouveautés v1.6
+
+- v1.6.0 : anti-gel v2 (JUCE 8.0.15, caches refaits par le timer, chien de garde, aucun appel à l'hôte depuis le thread audio)
