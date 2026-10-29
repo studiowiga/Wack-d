@@ -82,3 +82,5 @@ Référence DSP : J. O. Smith, *Physical Audio Signal Processing* (CCRMA), chapi
 ## Nouveautés v1.6
 
 - v1.6.0 : anti-gel v2 (JUCE 8.0.15, caches refaits par le timer, chien de garde, aucun appel à l'hôte depuis le thread audio)
+
+- v1.6.1 : menu de taille de fenêtre : « 60 % (default) », 75 %, 100 % (plus de taille en pixels)
