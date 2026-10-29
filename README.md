@@ -55,6 +55,8 @@ Sources : effectsdatabase.com (fiche et manuel CF7), mirosol.kapsi.fi (puce M501
 | CC 27 | Footswitch bascule (chaque appui) |
 | Program Change 1-9 | Presets d'usine |
 
+**MIDI Learn (v1.7)** : clic droit sur un potard, un inverseur ou le footswitch > « MIDI Learn: <commande> », puis bouger la pédale / appuyer sur le footswitch MIDI. La ligne d'état affiche « MIDI LEARN: move a control for … » puis « <commande> = CC n ». « Clear MIDI » retire l'assignation ; clic droit > MIDI map > « Reset MIDI to defaults » revient à la table ci-dessus. Les assignations sont sauvegardées avec le projet.
+
 Tous les paramètres sont aussi automatisables et assignables en MIDI-learn dans le DAW.
 
 ## Presets d'usine
@@ -84,3 +86,7 @@ Référence DSP : J. O. Smith, *Physical Audio Signal Processing* (CCRMA), chapi
 - v1.6.0 : anti-gel v2 (JUCE 8.0.15, caches refaits par le timer, chien de garde, aucun appel à l'hôte depuis le thread audio)
 
 - v1.6.1 : menu de taille de fenêtre : « 60 % (default) », 75 %, 100 % (plus de taille en pixels)
+
+## Nouveautés v1.7
+
+- v1.7.0 : MIDI Learn au clic droit sur chaque commande (Clear MIDI, assignations sauvegardées avec le projet)

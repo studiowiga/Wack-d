@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "")
 
-project(WACKD VERSION 1.6.1 LANGUAGES C CXX)
+project(WACKD VERSION 1.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,7 +25,7 @@ juce_add_plugin(Wackd
     PLUGIN_CODE                 Wkcf
     FORMATS                     VST3
     PRODUCT_NAME                "Wackd"
-    VERSION                     1.6.0
+    VERSION                     1.7.0
     IS_SYNTH                    FALSE
     NEEDS_MIDI_INPUT            TRUE
     NEEDS_MIDI_OUTPUT           FALSE

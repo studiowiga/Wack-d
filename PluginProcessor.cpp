@@ -28,6 +28,27 @@ const wiga::PresetData& WackdAudioProcessor::getFactoryPreset (int index)
     return factoryPresets[(size_t) juce::jlimit (0, getNumFactoryPresets() - 1, index)];
 }
 
+const WackdAudioProcessor::LearnDef& WackdAudioProcessor::learnDef (int i)
+{
+    static const LearnDef defs[numLearn] =
+    {
+        { "speed",  "Speed",             ccSpeed,      learnContinuous, 0 },
+        { "depth",  "Depth",             ccDepth,      learnContinuous, 0 },
+        { "delay",  "Delay Time",        ccDelayTime,  learnContinuous, 0 },
+        { "regen",  "Regen.",            ccRegen,      learnContinuous, 0 },
+        { "mode",   "Mode",              ccMode,       learnToggle,     2 },   // >= 64 : Flanger
+        { "krazy",  "Krazy",             ccKrazy,      learnToggle,     2 },   // >= 64 : Wack'd
+        { "active", "Footswitch",        ccFootswitch, learnFootswitch, 0 },   // >= 64 ON, < 64 OFF
+        { "active", "Footswitch toggle", ccFootToggle, learnFootToggle, 0 },   // chaque appui inverse l'etat
+    };
+    return defs[juce::jlimit (0, numLearn - 1, i)];
+}
+
+void WackdAudioProcessor::resetMidiMap()
+{
+    for (int i = 0; i < numLearn; ++i) ccMap[i].store (learnDef (i).defaultCC);
+}
+
 //==============================================================================
 WackdAudioProcessor::WackdAudioProcessor()
     : AudioProcessor (BusesProperties()
@@ -49,6 +70,7 @@ WackdAudioProcessor::WackdAudioProcessor()
         pendingValue[i].store (0.0f);
         pendingSet[i].store (false);
     }
+    resetMidiMap();
     startTimerHz (60);
 }
 
@@ -191,26 +213,43 @@ void WackdAudioProcessor::handleMidi (juce::MidiBuffer& midi)
             const int v  = m.getControllerValue();
             const float knobValue = (float) v / 127.0f * 10.0f;
 
-            bool known = true;
-            switch (cc)
+            // MIDI Learn : le premier CC recu est affecte a la commande visee (il n'agit pas sur le son)
+            const int lt = learnTarget.load();
+            if (lt >= 0 && lt < numLearn && cc < 120)
             {
-                case ccSpeed:      setParamFromAudio ("speed", knobValue);           break;
-                case ccDepth:      setParamFromAudio ("depth", knobValue);           break;
-                case ccDelayTime:  setParamFromAudio ("delay", knobValue);           break;
-                case ccRegen:      setParamFromAudio ("regen", knobValue);           break;
-                case ccMode:       setParamFromAudio ("mode",  v >= 64 ? 1.0f : 0.0f);  break;
-                case ccKrazy:      setParamFromAudio ("krazy", v >= 64 ? 1.0f : 0.0f);  break;
-                case ccFootswitch: setParamFromAudio ("active", v >= 64 ? 1.0f : 0.0f); break;
-                case ccFootToggle:
-                    if (v >= 64 && prevToggleValue < 64)
-                        setParamFromAudio ("active", queuedOrCurrent ("active", pActive) > 0.5f ? 0.0f : 1.0f);
-                    prevToggleValue = v;
-                    break;
-                default: known = false; break;
+                for (int j = 0; j < numLearn; ++j)
+                    if (j != lt && ccMap[j].load() == cc) ccMap[j].store (-1);   // numero deja pris : l'autre commande est desassignee
+                ccMap[lt].store (cc);
+                prevFsCC[lt] = v;
+                lastLearned.store (lt);
+                learnTarget.store (-1);
+                lastMidiCC = cc; lastMidiValue = v; ++midiCounter;
+                continue;
             }
 
-            if (known && cc <= ccRegen)
-                currentPreset = -1;
+            int ctl = -1;
+            for (int j = 0; j < numLearn; ++j)
+                if (ccMap[j].load (std::memory_order_relaxed) == cc) { ctl = j; break; }
+
+            if (ctl >= 0)
+            {
+                const auto& d = learnDef (ctl);
+                switch (d.type)
+                {
+                    case learnContinuous: setParamFromAudio (d.id, knobValue); break;
+                    case learnToggle:
+                    case learnFootswitch: setParamFromAudio (d.id, v >= 64 ? 1.0f : 0.0f); break;
+                    case learnFootToggle:
+                        if (v >= 64 && prevFsCC[ctl] < 64)
+                            setParamFromAudio (d.id, queuedOrCurrent (d.id, pActive) > 0.5f ? 0.0f : 1.0f);
+                        break;
+                    default: break;
+                }
+                prevFsCC[ctl] = v;
+
+                if (ctl < numKnobs)
+                    currentPreset = -1;
+            }
 
             lastMidiCC    = cc;
             lastMidiValue = v;
@@ -567,6 +606,8 @@ void WackdAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     state.setProperty ("currentPreset", currentPreset.load(), nullptr);
+    for (int i = 0; i < numLearn; ++i)
+        state.setProperty ("cc_" + juce::String (i), ccMap[i].load(), nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -579,6 +620,9 @@ void WackdAudioProcessor::setStateInformation (const void* data, int sizeInBytes
         {
             auto state = juce::ValueTree::fromXml (*xml);
             currentPreset = (int) state.getProperty ("currentPreset", 0);
+            // assignations MIDI Learn (ancien projet sans ces proprietes : numeros par defaut 20 a 27)
+            for (int i = 0; i < numLearn; ++i)
+                ccMap[i].store (juce::jlimit (-1, 127, (int) state.getProperty ("cc_" + juce::String (i), learnDef (i).defaultCC)));
             apvts.replaceState (state);
         }
     }

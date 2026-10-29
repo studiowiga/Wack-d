@@ -160,7 +160,15 @@ WackdAudioProcessorEditor::WackdAudioProcessorEditor (WackdAudioProcessor& p)
     const char* ids[4] = { "speed", "depth", "delay", "regen" };
     for (int i = 0; i < 4; ++i)
         lastKnobs[i] = proc.apvts.getRawParameterValue (ids[i])->load();
-    rightClickFwd.callback = [this] { showContextMenu(); };
+    rightClickFwd.callback = [this] (Component* c)
+    {
+        // index des commandes = learnDef du processeur (0-3 potards, 4 Mode, 5 Krazy, 6 footswitch)
+        const Component* ctls[7] = { &speed, &depth, &delay, &regen, &modeSwitch, &krazySwitch, &footswitch };
+        int idx = -1;
+        for (int i = 0; i < 7; ++i)
+            if (c == ctls[i]) idx = i;
+        showContextMenu (idx);
+    };
 
     auto setupKnob = [this] (Slider& s, const char* id,
                              std::unique_ptr<AudioProcessorValueTreeState::SliderAttachment>& att)
@@ -415,7 +423,27 @@ void WackdAudioProcessorEditor::timerCallback()
             {
                 statusUntil = now + 2500.0;
                 meterKnob = i;
+                learnLineUntil = 0.0;
             }
+
+        // MIDI Learn : attente puis confirmation 2 s dans la ligne d'etat
+        const int lt = proc.learnTarget.load();
+        const int learned = proc.lastLearned.exchange (-1);
+        if (learned >= 0)
+        {
+            learnLine = String (WackdAudioProcessor::learnDef (learned).name) + " = CC " + String (proc.ccMap[learned].load());
+            learnLineUntil = now + 2000.0;
+            statusUntil = jmax (statusUntil, learnLineUntil);
+        }
+        else if (lt >= 0)
+        {
+            learnLine = "MIDI LEARN: move a control for " + String (WackdAudioProcessor::learnDef (lt).name);
+            learnLineUntil = now + 200.0;
+            statusUntil = jmax (statusUntil, now + 200.0);
+        }
+        // (le message de learn reste pendant le fondu de sortie)
+        if (learnLineUntil > 0.0 && now < learnLineUntil + 800.0)
+            lastStatus = learnLine;
 
         const float target = now < statusUntil ? 1.0f : 0.0f;
         statusAlpha += (target - statusAlpha) * (target > statusAlpha ? 0.45f : 0.12f);
@@ -573,8 +601,10 @@ void WackdAudioProcessorEditor::drawStatus (Graphics& g)
 
     g.setColour (Colours::white.withAlpha (a));
     g.setFont (font (20.0f, true));
-    g.drawText (lastStatus.isEmpty() ? buildStatusLine() : lastStatus,
-                statusRect.withHeight (31.0f).translated (0.0f, 3.0f), Justification::centred);
+    // (messages MIDI Learn plus longs : meme police, reduite au besoin pour tenir sur la ligne)
+    g.drawFittedText (lastStatus.isEmpty() ? buildStatusLine() : lastStatus,
+                      statusRect.withHeight (31.0f).translated (0.0f, 3.0f).reduced (6.0f, 0.0f).toNearestInt(),
+                      Justification::centred, 1, 0.7f);
 
     g.setColour ((midiFlash > 0 ? Colours::white : accent).withMultipliedAlpha (a));
     g.setFont (font (15.5f, true));
@@ -655,9 +685,44 @@ void WackdAudioProcessorEditor::mouseDown (const MouseEvent& e)
         showContextMenu();
 }
 
-void WackdAudioProcessorEditor::showContextMenu()
+void WackdAudioProcessorEditor::addMidiMenu (PopupMenu& menu, int learnIdx)
+{
+    if (learnIdx < 0)
+        return;
+
+    auto ccText = [this] (int i)
+    {
+        const int cc = proc.ccMap[i].load();
+        return cc >= 0 ? "CC " + String (cc) : String ("none");
+    };
+    const int lt = proc.learnTarget.load();
+
+    // clic droit sur une commande : MIDI Learn de cette commande en tete du menu
+    // (footswitch : CC ON/OFF et CC bascule, comme les deux CC d'origine 26 et 27)
+    const int last = learnIdx == 6 ? 7 : learnIdx;
+    for (int i = learnIdx; i <= last; ++i)
+    {
+        const String name = WackdAudioProcessor::learnDef (i).name;
+        menu.addItem (1000 + i, "MIDI Learn: " + name + " (" + ccText (i) + ")", true, lt == i);
+        menu.addItem (1100 + i, "Clear MIDI: " + name, proc.ccMap[i].load() >= 0);
+    }
+    if (lt >= 0) menu.addItem (1200, "Cancel MIDI learn");
+    menu.addSeparator();
+}
+
+void WackdAudioProcessorEditor::handleMidiMenu (int r)
+{
+    if (r >= 1000 && r < 1000 + WackdAudioProcessor::numLearn)
+        proc.learnTarget.store (proc.learnTarget.load() == r - 1000 ? -1 : r - 1000);   // re-cliquer annule
+    else if (r >= 1100 && r < 1100 + WackdAudioProcessor::numLearn) proc.ccMap[r - 1100].store (-1);
+    else if (r == 1200) proc.learnTarget.store (-1);
+    else if (r == 1201) { proc.learnTarget.store (-1); proc.resetMidiMap(); }
+}
+
+void WackdAudioProcessorEditor::showContextMenu (int learnIdx)
 {
     PopupMenu menu;
+    addMidiMenu (menu, learnIdx);
 
     PopupMenu sizes;
     const int defaultW = roundToInt ((float) defaultH * (float) baseW / (float) baseH);
@@ -693,19 +758,24 @@ void WackdAudioProcessorEditor::showContextMenu()
     menu.addSeparator();
 
     PopupMenu midi;
-    midi.addItem (900, "CC 20  Speed",                            false);
-    midi.addItem (901, "CC 21  Depth",                            false);
-    midi.addItem (902, "CC 22  Delay Time",                       false);
-    midi.addItem (903, "CC 23  Regen.",                           false);
-    midi.addItem (904, "CC 24  Mode (0-63 Chorus / 64+ Flanger)", false);
-    midi.addItem (905, "CC 25  Krazy (0-63 Normal / 64+ Wack'd)", false);
-    midi.addItem (906, "CC 26  Footswitch (64+ ON / 0-63 OFF)",   false);
-    midi.addItem (907, "CC 27  Footswitch toggle (each press)",   false);
-    midi.addItem (908, "Program Change 1-9  Factory presets",     false);
+    for (int i = 0; i < WackdAudioProcessor::numLearn; ++i)
+    {
+        const int cc = proc.ccMap[i].load();
+        midi.addItem (1000 + i, "Learn: " + String (WackdAudioProcessor::learnDef (i).name)
+                                 + " (" + (cc >= 0 ? "CC " + String (cc) : String ("none")) + ")",
+                      true, proc.learnTarget.load() == i);
+    }
+    midi.addSeparator();
+    if (proc.learnTarget.load() >= 0) midi.addItem (1200, "Cancel MIDI learn");
+    midi.addItem (1201, "Reset MIDI to defaults (CC 20-27)");
+    midi.addSeparator();
+    midi.addItem (906, "Mode / Krazy: 64+ = Flanger / Wack'd",       false);
+    midi.addItem (907, "Footswitch: 64+ ON / 0-63 OFF",              false);
+    midi.addItem (908, "Program Change 1-9  Factory presets",        false);
     menu.addSubMenu ("MIDI map", midi);
 
     menu.addSeparator();
-    menu.addItem (999, "Wack'd flangerus v1.6.0 - STUDIO WIGA", false);
+    menu.addItem (999, "Wack'd flangerus v" + String (JucePlugin_VersionString) + " - STUDIO WIGA", false);
 
     menu.showMenuAsync (PopupMenu::Options().withTargetComponent (this),
         [safe = Component::SafePointer<WackdAudioProcessorEditor> (this)] (int r)
@@ -725,6 +795,7 @@ void WackdAudioProcessorEditor::showContextMenu()
             else if (r >= 100 && r < 200) ed.proc.applyFactoryPreset (r - 100);
             else if (r > 200 && r < 300)  ed.proc.loadUserPreset (r - 200);
             else if (r > 300 && r < 400)  ed.proc.saveUserPreset (r - 300);
+            else if (r >= 1000) { ed.handleMidiMenu (r); return; }
 
             ed.repaint();
         });
